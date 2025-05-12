@@ -11,12 +11,12 @@ import numpy as np
 def load_hsi_data(file_path):
     """
     Load hyperspectral imaging data from a file
-    
+
     Parameters
     ----------
     file_path : str
         Path to the HSI data file
-        
+
     Returns
     -------
     np.ndarray
@@ -26,17 +26,17 @@ def load_hsi_data(file_path):
     raise NotImplementedError("Function not implemented yet")
 
 
-def normalize_spectra(hsi_data, method='minmax'):
+def normalize_spectra(hsi_data, method="minmax"):
     """
     Normalize spectral data
-    
+
     Parameters
     ----------
     hsi_data : np.ndarray
         Hyperspectral data cube
     method : str, optional
         Normalization method ('minmax', 'standard', etc.)
-        
+
     Returns
     -------
     np.ndarray

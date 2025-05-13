@@ -4,6 +4,7 @@ import re
 from scipy.io import loadmat
 import numpy as np
 import typing  # Added import for typing.Union
+from .constants import HSI_DATA_DIR, METADATA_CSV_PATH
 
 
 class HSIDataset:
@@ -15,7 +16,11 @@ class HSIDataset:
     Handles samples that may have multiple Fields of View (FOVs).
     """
 
-    def __init__(self, hsi_data_dir: str, metadata_csv_path: str):
+    def __init__(
+        self,
+        hsi_data_dir: str = HSI_DATA_DIR,
+        metadata_csv_path: str = METADATA_CSV_PATH,
+    ):
         """
         Initializes the HSIDataset.
 

@@ -3,17 +3,20 @@ import os
 import re
 from scipy.io import loadmat
 import numpy as np
-import typing  # Added import for typing.Union
+import typing
+import h5py
+import torch
+from torch.utils.data import Dataset
 from .constants import HSI_DATA_DIR, METADATA_CSV_PATH
 
 
-class HSIDataset:
+class HSIDataset(Dataset):
     """
     A dataset class to load and manage HSI biopsy data.
 
     It reads hyperspectral cubes from .mat files located in a specified directory
     and associates them with metadata from a provided CSV file.
-    Handles samples that may have multiple Fields of View (FOVs).
+    Each sample is a single HSI cube, making it memory-efficient for training.
     """
 
     def __init__(
@@ -56,7 +59,15 @@ class HSIDataset:
             if "normalized_id" not in self.metadata_df.columns:
                 self.metadata_df["normalized_id"] = pd.Series(dtype="str")
 
-        self.samples = self._find_samples()
+        # Each sample is a single HSI cube now, rather than a patient with multiple FOVs
+        self.cube_samples = self._find_cube_samples()
+        self.cube_samples.sort(key=lambda x: x["combined_id"])
+
+        # Dictionary for faster sample lookups by combined_id
+        self.sample_map = {s["combined_id"]: i for i, s in enumerate(self.cube_samples)}
+
+        # ensure proper Dataset behavior
+        super().__init__()
 
     def _normalize_id_csv(self, sample_id: any) -> typing.Union[str, any]:
         """Normalizes sample IDs from the CSV for consistent matching."""
@@ -70,12 +81,20 @@ class HSIDataset:
             filename_id_part.strip()
         )  # Basic strip, regex usually gives clean S<num>.<num>
 
-    def _find_samples(self) -> list:
+    def _extract_patient_number(self, sample_id: str) -> str:
         """
-        Scans the HSI data directory, parses filenames, and links to metadata.
-        Groups files by sample ID, accommodating multiple FOVs per sample.
+        Extracts the patient number from a sample ID (e.g., 'S1.2' -> '1.2').
         """
-        samples_map = {}
+        if sample_id.startswith("S"):
+            return sample_id[1:]
+        return sample_id
+
+    def _find_cube_samples(self) -> list:
+        """
+        Scans the HSI data directory and treats each HSI cube as a separate sample.
+        Each sample gets a unique combined_id of format "patient_number_fov_number".
+        """
+        cube_samples = []
         # Regex: HyperProbe1.1_Biopsy_ (S<digits>.<digits>) (_FOV(<digits>))? .mat
         pattern = re.compile(r"^HyperProbe1\.1_Biopsy_(S\d+\.\d+)(?:_FOV(\d+))?\.mat$")
 
@@ -89,7 +108,14 @@ class HSIDataset:
                 raw_sample_id_part = match.group(1)  # e.g., "S1.2"
                 fov_number_str = match.group(2)  # e.g., "1" or None
 
+                # Default FOV is "1" if not specified
+                fov_key = fov_number_str if fov_number_str else "1"
+
                 normalized_file_id = self._normalize_id_filename(raw_sample_id_part)
+                patient_number = self._extract_patient_number(normalized_file_id)
+
+                # Create a combined ID like "1.2_3" for patient S1.2 FOV 3
+                combined_id = f"{patient_number}_{fov_key}"
 
                 if (
                     not self.metadata_df.empty
@@ -97,127 +123,177 @@ class HSIDataset:
                     and normalized_file_id in self.metadata_df.index
                 ):
                     file_path = os.path.join(self.hsi_data_dir, filename)
-                    fov_key = (
-                        fov_number_str if fov_number_str else "1"
-                    )  # Default FOV key
 
-                    if normalized_file_id not in samples_map:
-                        # Ensure metadata is a dict, even if multiple rows match (should not happen with set_index)
-                        meta_entry = self.metadata_df.loc[normalized_file_id]
-                        if isinstance(
-                            meta_entry, pd.DataFrame
-                        ):  # if somehow index is not unique
-                            metadata = meta_entry.iloc[0].to_dict()
-                            print(
-                                f"Warning: Multiple metadata entries for {normalized_file_id}, using first."
-                            )
-                        else:
-                            metadata = meta_entry.to_dict()
+                    # Ensure metadata is a dict, even if multiple rows match (should not happen with set_index)
+                    meta_entry = self.metadata_df.loc[normalized_file_id]
+                    if isinstance(
+                        meta_entry, pd.DataFrame
+                    ):  # if somehow index is not unique
+                        metadata = meta_entry.iloc[0].to_dict()
+                        print(
+                            f"Warning: Multiple metadata entries for {normalized_file_id}, using first."
+                        )
+                    else:
+                        metadata = meta_entry.to_dict()
 
-                        samples_map[normalized_file_id] = {
-                            "id": metadata.get(
-                                "id", normalized_file_id
-                            ),  # Use original CSV id if available
-                            "files": [],
-                            "metadata": metadata,
+                    # Each sample is a single HSI cube
+                    cube_samples.append(
+                        {
+                            "combined_id": combined_id,  # Unique ID for each cube (patient_fov)
+                            "patient_id": normalized_file_id,  # Original patient ID (e.g., S1.2)
+                            "fov": fov_key,  # FOV number
+                            "file_path": file_path,  # Path to the .mat file
+                            "metadata": metadata,  # Associated metadata
                         }
-
-                    samples_map[normalized_file_id]["files"].append(
-                        {"path": file_path, "fov": fov_key}
                     )
                 else:
                     print(
                         f"Warning: Metadata not found for sample ID '{normalized_file_id}' from file '{filename}' (normalized from '{raw_sample_id_part}')"
                     )
 
-        for sample_id_key in samples_map:
-            # Sort files by FOV number for consistent order
-            samples_map[sample_id_key]["files"].sort(
-                key=lambda x: int(x["fov"]) if x["fov"].isdigit() else -1
-            )
-
-        return list(samples_map.values())
+        return cube_samples
 
     def __len__(self) -> int:
-        """Returns the number of unique samples found."""
-        return len(self.samples)
+        """Returns the number of individual HSI cubes in the dataset."""
+        return len(self.cube_samples)
 
     def __getitem__(self, idx: int) -> dict:
         """
-        Retrieves a sample by its index.
+        Retrieves a single HSI cube sample by its index.
 
-        Loads HSI data for all FOVs of the sample.
-        Returns a dictionary containing sample ID, metadata, and HSI cubes.
+        Parameters
+        ----------
+        idx : int
+            Index of the sample to retrieve.
+
+        Returns
+        -------
+        dict
+            A dictionary containing:
+            - combined_id: Unique identifier of format "patient_number_fov_number"
+            - patient_id: The patient identifier (e.g., "S1.2")
+            - fov: The field of view number
+            - hsi_cube: The hyperspectral cube data
+            - metadata: Associated metadata from the CSV
         """
-        if idx < 0 or idx >= len(self.samples):
+        # Validate index
+        if idx < 0 or idx >= len(self.cube_samples):
             raise IndexError("Sample index out of range.")
 
-        sample_info = self.samples[idx]
-        print(f"Loading sample {idx + 1}/{len(self.samples)}: {sample_info}")
-        hsi_cubes = {}
+        sample_info = self.cube_samples[idx]
 
-        for file_info in sample_info["files"]:
-            try:
-                mat_data = loadmat(file_info["path"])
-                # Attempt to find the HSI cube data within the .mat file
-                cube_key = None
-                potential_keys = ["cube", "hsi_data", "image", "data", "hsi"]
-                for pk in potential_keys:
-                    if (
-                        pk in mat_data
-                        and isinstance(mat_data[pk], np.ndarray)
-                        and mat_data[pk].ndim >= 2
-                    ):  # typically 3D
-                        cube_key = pk
-                        break
-
-                if (
-                    not cube_key
-                ):  # Fallback: find the largest 3D array or first 3D array
-                    for key, value in mat_data.items():
-                        if (
-                            not key.startswith("__")
-                            and isinstance(value, np.ndarray)
-                            and value.ndim >= 2
-                        ):  # Min 2D
-                            if (
-                                cube_key is None
-                                or (value.ndim > mat_data[cube_key].ndim)
-                                or (
-                                    value.ndim == mat_data[cube_key].ndim
-                                    and np.prod(value.shape)
-                                    > np.prod(mat_data[cube_key].shape)
-                                )
-                            ):
-                                cube_key = key
-
-                if cube_key:
-                    hsi_cubes[file_info["fov"]] = mat_data[cube_key]
-                else:
-                    print(
-                        f"Warning: Could not find HSI data cube in {file_info['path']}"
-                    )
-                    hsi_cubes[file_info["fov"]] = None
-            except Exception as e:
-                print(f"Error loading HSI data from {file_info['path']}: {e}")
-                hsi_cubes[file_info["fov"]] = None
+        # Lazy loading of the HSI cube data
+        hsi_cube = self._load_hsi_cube(sample_info["file_path"])
 
         return {
-            "id": sample_info["id"],
-            "hsi_cubes": hsi_cubes,
+            "combined_id": sample_info["combined_id"],
+            "patient_id": sample_info["patient_id"],
+            "fov": sample_info["fov"],
+            "hsi_cube": hsi_cube,
             "metadata": sample_info["metadata"],
         }
 
-    def get_sample_by_id(self, sample_id_query: str) -> typing.Union[dict, None]:
+    def _load_hsi_cube(self, file_path: str) -> np.ndarray:
         """
-        Retrieves a sample by its original ID (as in CSV).
+        Loads a single HSI cube from a .mat file.
+
+        Parameters
+        ----------
+        file_path : str
+            Path to the .mat file containing the HSI cube.
+
+        Returns
+        -------
+        np.ndarray or None
+            The HSI cube data as a numpy array, or None if loading fails.
         """
-        normalized_query_id = self._normalize_id_csv(sample_id_query)
-        for i, sample_data in enumerate(self.samples):
-            # 'id' in sample_data should be the original CSV id
-            if self._normalize_id_csv(sample_data["id"]) == normalized_query_id:
-                return self.__getitem__(i)
-        print(
-            f"Sample with ID '{sample_id_query}' (normalized: '{normalized_query_id}') not found."
-        )
+        try:
+            with h5py.File(file_path, "r") as f:
+                dset = f["Ref_hyper"]
+                return dset[...]
+        except Exception as e:
+            print(f"Error loading HSI data from {file_path}: {e}")
+            return None
+
+    def get_sample_by_combined_id(self, combined_id: str) -> typing.Union[dict, None]:
+        """
+        Retrieves a sample by its combined ID (patient_number_fov).
+
+        Parameters
+        ----------
+        combined_id : str
+            The combined ID in the format "patient_number_fov_number" (e.g., "1.2_3").
+
+        Returns
+        -------
+        dict or None
+            The sample data or None if not found.
+        """
+        if combined_id in self.sample_map:
+            return self.__getitem__(self.sample_map[combined_id])
+
+        print(f"Sample with combined ID '{combined_id}' not found.")
         return None
+
+    def get_samples_by_patient_id(self, patient_id: str) -> typing.List[dict]:
+        """
+        Retrieves all samples (FOVs) for a specific patient ID.
+
+        Parameters
+        ----------
+        patient_id : str
+            The patient ID (e.g., "S1.2").
+
+        Returns
+        -------
+        list of dict
+            A list of all samples for the given patient, empty if none found.
+        """
+        normalized_id = self._normalize_id_csv(patient_id)
+
+        # Strip "S" prefix if present for matching with combined_id format
+        if normalized_id.startswith("S"):
+            patient_number = normalized_id[1:]
+        else:
+            patient_number = normalized_id
+
+        samples = []
+        for idx, sample in enumerate(self.cube_samples):
+            if sample["combined_id"].startswith(f"{patient_number}_"):
+                samples.append(self.__getitem__(idx))
+
+        if not samples:
+            print(
+                f"No samples found for patient ID '{patient_id}' (normalized: '{normalized_id}')."
+            )
+
+        return samples
+
+    def get_sample_by_patient_and_fov(
+        self, patient_id: str, fov: str
+    ) -> typing.Union[dict, None]:
+        """
+        Retrieves a specific sample by patient ID and FOV number.
+
+        Parameters
+        ----------
+        patient_id : str
+            The patient ID (e.g., "S1.2").
+        fov : str
+            The FOV number as a string.
+
+        Returns
+        -------
+        dict or None
+            The sample data or None if not found.
+        """
+        normalized_id = self._normalize_id_csv(patient_id)
+
+        # Strip "S" prefix if present for matching with combined_id format
+        if normalized_id.startswith("S"):
+            patient_number = normalized_id[1:]
+        else:
+            patient_number = normalized_id
+
+        combined_id = f"{patient_number}_{fov}"
+        return self.get_sample_by_combined_id(combined_id)

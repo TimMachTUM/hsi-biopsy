@@ -118,7 +118,7 @@ def show_interactive_image_with_spectrum(hsi_data, r_band=650, g_band=550, b_ban
     plt.show()
 
 
-def display_with_metadata(hsi_dataset, patient_id):
+def display_with_metadata(hsi_dataset, patient_id, save_to_path=None):
     """
     Display all HSI samples for a specific patient with their metadata.
 
@@ -128,6 +128,10 @@ def display_with_metadata(hsi_dataset, patient_id):
         The dataset containing HSI samples
     patient_id : str
         Patient ID to retrieve samples for (e.g., "S1.2")
+    save_to_path : str, optional
+        If provided, the figures will be saved to this directory path with the
+        naming convention S1_2FOV{FOV_num}.png (patient ID without "S" prefix,
+        underscores instead of dots, followed by FOV number)
 
     Returns
     -------
@@ -175,4 +179,28 @@ def display_with_metadata(hsi_dataset, patient_id):
         )
 
         plt.tight_layout()
+
+        # Save the figure if save_to_path is provided
+        if save_to_path:
+            import os
+
+            # Create directory if it doesn't exist
+            os.makedirs(save_to_path, exist_ok=True)
+
+            # Extract patient number (without "S" prefix if present)
+            patient_number = sample["patient_id"]
+            if patient_number.startswith("S"):
+                patient_number = patient_number[1:]
+
+            # Replace dots with underscores for filename
+            patient_number = patient_number.replace(".", "_")
+
+            # Construct filename using the requested naming convention
+            filename = f"S{patient_number}FOV{sample['fov']}.png"
+            filepath = os.path.join(save_to_path, filename)
+
+            # Save figure
+            fig.savefig(filepath, dpi=300, bbox_inches="tight")
+            print(f"Saved figure to {filepath}")
+
         plt.show()

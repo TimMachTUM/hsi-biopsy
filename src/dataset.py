@@ -96,7 +96,7 @@ class HSIDataset(Dataset):
         """
         cube_samples = []
         # Regex: HyperProbe1.1_Biopsy_ (S<digits>.<digits>) (_FOV(<digits>))? .mat
-        pattern = re.compile(r"^HyperProbe1\.1_Biopsy_(S\d+\.\d+)(?:_FOV(\d+))?\.mat$")
+        pattern = re.compile(r"^HyperProbe1\.1_Biopsy_(S\d+\.\d+)(?:_FOV(\d+))?(?:_BIS)?\.mat$")
 
         if not os.path.isdir(self.hsi_data_dir):
             print(f"Error: HSI data directory not found at {self.hsi_data_dir}")

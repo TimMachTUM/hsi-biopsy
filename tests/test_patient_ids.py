@@ -24,14 +24,14 @@ def main():
         # Access a patient ID directly as an attribute
         s1_2_value = ALL_PATIENT_IDS.S1_2
         print(f"ALL_PATIENT_IDS.S1_2 = {s1_2_value}")
-        
+
         # Access a few more patient IDs
         s1_6_value = ALL_PATIENT_IDS.S1_6
         print(f"ALL_PATIENT_IDS.S1_6 = {s1_6_value}")
-        
+
         s1_10_value = ALL_PATIENT_IDS.S1_10
         print(f"ALL_PATIENT_IDS.S1_10 = {s1_10_value}")
-        
+
         print("✅ Direct attribute access works!")
     except AttributeError as e:
         print(f"❌ Error accessing attributes: {e}")

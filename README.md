@@ -60,34 +60,9 @@ This project focuses on the analysis of hyperspectral imaging (HSI) data for bio
 
 ## Usage
 
-```python
-from src.dataset import HSIDataset
+For detailed instructions on how to use the dataset, including code examples and best practices, see the [Dataset Usage Guide](docs/dataset_usage.md).
 
-# Initialize dataset (reads paths from .env)
-ds = HSIDataset()
-
-# Number of HSI cubes in the dataset
-print(len(ds))
-
-# Load a single HSI cube by index
-sample = ds[0]
-print(sample['combined_id'])      # Unique ID in format "patient_number_fov"
-print(sample['patient_id'])       # Original patient ID (e.g., "S1.2") 
-print(sample['fov'])              # FOV number
-print(sample['hsi_cube'].shape)   # HSI cube data
-print(sample['metadata'])         # Associated metadata
-
-# Get by combined ID (e.g., "1.2_3" for patient S1.2, FOV 3)
-sample_by_id = ds.get_sample_by_combined_id("1.2_3")
-
-# Get all FOVs for a specific patient
-patient_samples = ds.get_samples_by_patient_id("S1.2")
-
-# Get a specific patient and FOV
-specific_sample = ds.get_sample_by_patient_and_fov("S1.2", "3")
-```
-
-For interactive analysis, see [notebooks/example_analysis.ipynb](notebooks/example_analysis.ipynb).
+For interactive analysis examples, see [notebooks/example_analysis.ipynb](notebooks/example_analysis.ipynb).
 
 ## Testing
 

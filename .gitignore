@@ -53,6 +53,7 @@ coverage.xml
 *.npz
 data/raw/
 data/processed/
+data/output_images/
 
 # Environment
 .env

@@ -105,8 +105,10 @@ def show_interactive_image_with_spectrum(hsi_data, r_band=650, g_band=550, b_ban
 
         # Create a new legend with the current lines
         if lines:
-            ax_spec.legend(lines, [line.get_label() for line in lines], loc="upper right")
-    
+            ax_spec.legend(
+                lines, [line.get_label() for line in lines], loc="upper right"
+            )
+
     ax_spec.set_title("Pixel Intensity Across Channels")
     ax_spec.set_xlabel("Wavelength (nm)")
     ax_spec.set_ylabel("Intensity")
@@ -114,3 +116,63 @@ def show_interactive_image_with_spectrum(hsi_data, r_band=650, g_band=550, b_ban
 
     cid = fig.canvas.mpl_connect("button_press_event", on_click)
     plt.show()
+
+
+def display_with_metadata(hsi_dataset, patient_id):
+    """
+    Display all HSI samples for a specific patient with their metadata.
+
+    Parameters
+    ----------
+    hsi_dataset : HSIDataset
+        The dataset containing HSI samples
+    patient_id : str
+        Patient ID to retrieve samples for (e.g., "S1.2")
+
+    Returns
+    -------
+    None
+        Displays the visualizations in the notebook
+    """
+    # Get all samples for the patient
+    samples = hsi_dataset.get_samples_by_patient_id(patient_id)
+
+    if not samples:
+        print(f"No samples found for patient ID '{patient_id}'")
+        return
+
+    # Display each sample with its metadata
+    for i, sample in enumerate(samples):
+        # Create RGB image
+        rgb = create_rgb(sample["hsi_cube"])
+
+        # Create figure with two columns: image and metadata
+        fig, (ax_img, ax_meta) = plt.subplots(
+            1, 2, figsize=(15, 7), gridspec_kw={"width_ratios": [1, 1]}
+        )
+
+        # Display RGB image
+        ax_img.imshow(rgb)
+        ax_img.set_title(f"Patient {sample['patient_id']}, FOV {sample['fov']}")
+        ax_img.axis("on")
+
+        # Turn off axis for metadata panel and use it for text
+        ax_meta.axis("off")
+        ax_meta.set_title("Metadata")
+
+        # Display metadata as text
+        metadata_text = "\n".join(
+            [f"{key}: {value}" for key, value in sample["metadata"].items()]
+        )
+        ax_meta.text(
+            0.05,
+            0.95,
+            metadata_text,
+            transform=ax_meta.transAxes,
+            fontsize=10,
+            verticalalignment="top",
+            family="monospace",
+        )
+
+        plt.tight_layout()
+        plt.show()
